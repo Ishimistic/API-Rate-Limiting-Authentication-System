@@ -1,6 +1,7 @@
 from django.http import JsonResponse
 from core.redis_client import redis_client
 from core.models import APIKey
+import time
 
 class RateLimitMiddleware:
     def __init__(self, get_response):
@@ -30,24 +31,17 @@ class RateLimitMiddleware:
             redis_key = f"rate_limit:{client_ip}"
             limit = self.DEFAULT_LIMIT
             window = self.DEFAULT_WINDOW
-        
-        count = redis_client.get(redis_key) # get current count
-        
-        if count is None:
-            redis_client.set(redis_key, 1, ex=window)
-            count = 1
-        else:
-            count = redis_client.incr(redis_key)
             
-        remainig = max(0, limit - int(count))
-            
-        if not api_key_value:
-            print(f"IP: {client_ip}, Count: {count}")
-        else: 
-            print(f"User: {api_key_obj.user.username}, Count: {count}")
-            
+        now = time.time()
+        window_start = now - window
         
-        if int(count) > limit:
+        # Remove all requests older than window
+        redis_client.zremrangebyscore(redis_key, 0, window_start)
+        
+        # Count current requests
+        count = redis_client.zcard(redis_key)
+        
+        if int(count) >= limit:
             return JsonResponse(
                 {"error": "Too many requests."}, 
                 status=429,
@@ -57,9 +51,24 @@ class RateLimitMiddleware:
                 }
             )
             
+        # Add current request
+        redis_client.zadd(redis_key, {str(now): now})
+        
+        # Expire key - Delete this key after `window` seconds
+        redis_client.expire(redis_key, window)
+        
+        remaining = max(0, limit - (count + 1))
+        
+        if not api_key_value:
+            print(f"IP: {client_ip}, Count: {count}")
+        else: 
+            print(f"User: {api_key_obj.user.username}, Count: {count}")
+            
+        
+            
         response = self.get_response(request)
         response["X-RateLimit-Limit"] = str(limit)
-        response["X-RateLimit-Remaining"] = str(remainig)
+        response["X-RateLimit-Remaining"] = str(remaining)
         
         return response
     
