@@ -44,7 +44,7 @@ def login_view(request):
         
         api_key = APIKey.objects.filter(user=user).first()
         
-        return JsonResponse({"message": "Login successful"}, headers={"X-API-KEY": api_key.api_key}, status=200)
+        return JsonResponse({"message": "Login successful"}, headers={"X-API-KEY": api_key.api_key if api_key else None}, status=200)
     
     
 def logout_view(request):
