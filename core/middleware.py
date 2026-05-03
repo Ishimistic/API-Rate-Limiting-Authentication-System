@@ -3,6 +3,10 @@ from core.redis_client import redis_client
 from core.models import APIKey
 from .views import hash_key
 import time
+from django.utils import timezone
+
+
+EXCLUDED_PATHS = ["/signup/", "/login/", "/logout/", "/regenerate-key/"]
 
 class RateLimitMiddleware:
     def __init__(self, get_response):
@@ -13,6 +17,9 @@ class RateLimitMiddleware:
         self.MAX_STRIKES = 3
         
     def __call__(self, request):
+        if request.path in EXCLUDED_PATHS:
+            return self.get_response(request)
+        
         incoming_api_key_value = request.headers.get("X-API-KEY")
         
         if incoming_api_key_value:
@@ -21,7 +28,7 @@ class RateLimitMiddleware:
             try:
                 api_key_obj = APIKey.objects.get(api_key=hashed_key)
                 
-                if  api_key_obj.is_active == False:
+                if  api_key_obj.is_active == False and api_key_obj.expires_at < timezone.now():
                     return JsonResponse({"error": "API Key is inactive"}, status=403)
                 
             except APIKey.DoesNotExist:

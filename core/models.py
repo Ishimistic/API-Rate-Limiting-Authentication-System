@@ -8,6 +8,7 @@ class APIKey(models.Model):
     window = models.IntegerField(default=30)
     
     is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     
     def save(self, *args, **kwargs):
         if not self.api_key:

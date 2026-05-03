@@ -6,6 +6,8 @@ import json
 from core.models import APIKey
 import secrets
 import hashlib
+from datetime import timedelta
+from django.utils import timezone
 
 
 def test_api(request):
@@ -31,7 +33,7 @@ def signup(request):
         raw_key = secrets.token_hex(32)
         hashed = hash_key(raw_key)
         
-        api_key = APIKey.objects.create(user=user, api_key=hashed)
+        api_key = APIKey.objects.create(user=user, api_key=hashed, expires_at=timezone.now() + timedelta(hours=24))
         
         return JsonResponse(
             {
@@ -53,14 +55,13 @@ def login_view(request):
         if user is  None:
             return JsonResponse({"error": "Invalid credentials"}, status=401)
         
-        
         raw_key = secrets.token_hex(32)
         hashed = hash_key(raw_key)
-
 
         api_obj, _ = APIKey.objects.get_or_create(user=user)
         api_obj.api_key = hashed
         api_obj.is_active = True
+        api_obj.expires_at = timezone.now() + timedelta(hours=24)
         api_obj.save()
 
 
@@ -90,3 +91,31 @@ def logout_view(request):
         return JsonResponse({"error": "Invalid API Key"}, status=403)
     
     return JsonResponse({"message": "Logout successful"}, status=200)
+
+
+
+@csrf_exempt
+def regenerate_api_key(request):
+    api_key_value = request.headers.get("X-API-KEY")
+
+    if not api_key_value:
+        return JsonResponse({"error": "API key required"}, status=400)
+
+    hashed = hash_key(api_key_value)
+
+    api_obj = APIKey.objects.filter(api_key=hashed, is_active=True).first()
+
+    if not api_obj:
+        return JsonResponse({"error": "Invalid API key"}, status=403)
+
+    new_raw = secrets.token_hex(32)
+    new_hashed = hash_key(new_raw)
+
+    api_obj.api_key = new_hashed
+    api_obj.expires_at = timezone.now() + timedelta(hours=24)
+    api_obj.save()
+
+    return JsonResponse({
+        "message": "API key regenerated",
+        "api_key": new_raw
+    })
