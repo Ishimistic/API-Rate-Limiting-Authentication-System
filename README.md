@@ -55,19 +55,26 @@ This project implements a **stateless API security layer** that controls access 
 
 ---
 
-##  Architecture
+##  Architecture Overview
+
+The request flow in this project follows a structured middleware-based pipeline to ensure security, validation, and rate limiting before executing business logic.
+
+###  Request Flow
+
+```text
 Client Request
-↓
+      ↓
 RateLimitMiddleware
-↓
-├── API Key Validation
-├── Expiry Check
-├── Ban Check
-├── Rate Limiting (Redis)
-↓
+      ↓
+ ├── API Key Validation
+ ├── Expiry Check
+ ├── Ban Check
+ ├── Rate Limiting (Redis)
+      ↓
 View Execution
-↓
+      ↓
 Response + Rate Limit Headers
+```
 
 
 
