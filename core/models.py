@@ -1,13 +1,13 @@
 from django.db import models
 from django.contrib.auth.models import User
 import secrets
-# Create your models here.
-
 class APIKey(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     api_key = models.CharField(max_length=255, unique=True, default=secrets.token_hex)
     rate_limit = models.IntegerField(default=20)
     window = models.IntegerField(default=30)
+    
+    is_active = models.BooleanField(default=True)
     
     def save(self, *args, **kwargs):
         if not self.api_key:

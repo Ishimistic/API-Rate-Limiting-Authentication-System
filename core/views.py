@@ -4,10 +4,16 @@ from django.contrib.auth import authenticate, login, logout
 from django.views.decorators.csrf import csrf_exempt
 import json
 from core.models import APIKey
+import secrets
+import hashlib
 
 
 def test_api(request):
     return JsonResponse({"message": "API working"})
+
+
+def hash_key(key):
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 @csrf_exempt
@@ -22,12 +28,17 @@ def signup(request):
         
         user = User.objects.create_user(username=username, password=password)
         
-        api_key = APIKey.objects.create(user=user)
+        raw_key = secrets.token_hex(32)
+        hashed = hash_key(raw_key)
         
-        return JsonResponse({
-            "message": "User created successfully",
-            "api_key": api_key.api_key
-        },status=201)
+        api_key = APIKey.objects.create(user=user, api_key=hashed)
+        
+        return JsonResponse(
+            {
+               "message": "User created successfully",
+               "api_key": raw_key
+            },status=201
+        )
         
         
 @csrf_exempt       
@@ -42,16 +53,40 @@ def login_view(request):
         if user is  None:
             return JsonResponse({"error": "Invalid credentials"}, status=401)
         
-        api_key = APIKey.objects.filter(user=user).first()
         
-        return JsonResponse({"message": "Login successful"}, headers={"X-API-KEY": api_key.api_key if api_key else None}, status=200)
+        raw_key = secrets.token_hex(32)
+        hashed = hash_key(raw_key)
+
+
+        api_obj, _ = APIKey.objects.get_or_create(user=user)
+        api_obj.api_key = hashed
+        api_obj.is_active = True
+        api_obj.save()
+
+
+        return JsonResponse({
+            "message": "Login successful",
+            "api_key": raw_key  
+        })
+    
     
     
 def logout_view(request):
     api_key_value = request.headers.get("X-API-KEY")
-
-    if api_key_value:
-        APIKey.objects.filter(api_key=api_key_value).delete()
-        
-    logout(request)
+    
+    if not api_key_value:
+        return JsonResponse({"error": "API Key required"}, status=400)
+    
+    hashed = hash_key(api_key_value)
+    
+    api_obj = APIKey.objects.filter(api_key=hashed).first()
+    
+    if api_obj:
+        api_obj.is_active = False
+        api_obj.save()
+    
+    else:
+        print(f"Logout attempt with invalid API Key: {api_key_value}")
+        return JsonResponse({"error": "Invalid API Key"}, status=403)
+    
     return JsonResponse({"message": "Logout successful"}, status=200)

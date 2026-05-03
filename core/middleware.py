@@ -1,6 +1,7 @@
 from django.http import JsonResponse
 from core.redis_client import redis_client
 from core.models import APIKey
+from .views import hash_key
 import time
 
 class RateLimitMiddleware:
@@ -8,13 +9,21 @@ class RateLimitMiddleware:
         self.get_response = get_response
         self.DEFAULT_LIMIT = 10
         self.DEFAULT_WINDOW = 30
+        self.BAN_TIME = 24 * 60 * 60 # 24 hours
+        self.MAX_STRIKES = 3
         
     def __call__(self, request):
-        api_key_value = request.headers.get("X-API-KEY")
+        incoming_api_key_value = request.headers.get("X-API-KEY")
         
-        if api_key_value:
+        if incoming_api_key_value:
+            hashed_key = hash_key(incoming_api_key_value)
+            
             try:
-                api_key_obj = APIKey.objects.get(api_key=api_key_value)
+                api_key_obj = APIKey.objects.get(api_key=hashed_key)
+                
+                if  api_key_obj.is_active == False:
+                    return JsonResponse({"error": "API Key is inactive"}, status=403)
+                
             except APIKey.DoesNotExist:
                 return JsonResponse({"error": "Invalid API Key"}, status=403)
             
@@ -32,16 +41,45 @@ class RateLimitMiddleware:
             limit = self.DEFAULT_LIMIT
             window = self.DEFAULT_WINDOW
             
+        identifier = redis_key
+        ban_key = f"ban:{identifier}"
+        strike_key = f"strike:{identifier}"
+        
+        # Checking ban 
+        if redis_client.exists(ban_key):
+            return JsonResponse(
+                {
+                    "error": "You are temporarily banned due to repeated rate limit violations."
+                }, status=403
+            )
+         
+         
+        # Sliding window part   
         now = time.time()
         window_start = now - window
-        
         # Remove all requests older than window
         redis_client.zremrangebyscore(redis_key, 0, window_start)
-        
         # Count current requests
         count = redis_client.zcard(redis_key)
         
-        if int(count) >= limit:
+        
+        #Limit exceedes
+        if count >= limit:
+            strikes = redis_client.incr(strike_key)
+            redis_client.expire(strike_key, window) # Remove the strike_key after `window` time
+            
+            print(f"Identifier: {identifier}, Strikes: {strikes}")
+            
+            if strikes >= self.MAX_STRIKES:
+                redis_client.set(ban_key, 1, ex=self.BAN_TIME)
+                redis_client.delete(strike_key) # Reset strikes after banning
+                
+                return JsonResponse(
+                    {
+                        "error": "You have been temporarily banned due to repeated rate limit violations."
+                    }, status=403
+                )
+            
             return JsonResponse(
                 {"error": "Too many requests."}, 
                 status=429,
@@ -59,7 +97,7 @@ class RateLimitMiddleware:
         
         remaining = max(0, limit - (count + 1))
         
-        if not api_key_value:
+        if not incoming_api_key_value:
             print(f"IP: {client_ip}, Count: {count}")
         else: 
             print(f"User: {api_key_obj.user.username}, Count: {count}")
