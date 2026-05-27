@@ -6,6 +6,7 @@ import time
 from django.utils import timezone
 from core.lua_scripts import RATE_LIMIT_LUA
 from core.plans import PLAN_LIMITS
+from core.fallback import fallback_rate_limit
 
 
 EXCLUDED_PATHS = ["/signup/", "/login/", "/logout/", "/regenerate-key/"]
@@ -60,19 +61,11 @@ class RateLimitMiddleware:
         ban_key = f"ban:{identifier}"
         strike_key = f"strike:{identifier}"
         
-        # Checking ban 
-        if redis_client.exists(ban_key):
-            return JsonResponse(
-                {
-                    "error": "You are temporarily banned due to repeated rate limit violations."
-                }, status=403
-            )
-         
-         
-        # Sliding window part   
+        
         now = int(time.time())
        
-        result = redis_client.eval(
+        try:
+           result = redis_client.eval(
             RATE_LIMIT_LUA,
             3, # Number of keys
             redis_key, # KEYS[1]
@@ -85,8 +78,27 @@ class RateLimitMiddleware:
             self.BAN_TIME
         )
         
-        status = result[0]
-        value = result[1]
+           status = result[0]
+           value = result[1]
+           
+        except Exception as e:
+            print(f"Redis DOWN: {e}")
+            
+            allowed, count = fallback_rate_limit(identifier, limit, window)
+            
+            if not allowed:
+                return JsonResponse(
+                    {
+                        "error": "Too many requests."
+                    }, status=429
+                ) 
+                
+            response = self.get_response(request)
+            response["X-RateLimit-Limit"] = str(limit)
+            response["X-RateLimit-Remaining"] = str(max(0, limit - count))
+            
+            return response
+        
         
         if status == 0:
             return JsonResponse(
