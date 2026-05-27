@@ -5,6 +5,7 @@ from .views import hash_key
 import time
 from django.utils import timezone
 from core.lua_scripts import RATE_LIMIT_LUA
+from core.plans import PLAN_LIMITS
 
 
 EXCLUDED_PATHS = ["/signup/", "/login/", "/logout/", "/regenerate-key/"]
@@ -39,10 +40,13 @@ class RateLimitMiddleware:
                 return JsonResponse({"error": "Invalid API Key"}, status=403)
             
             redis_key = f"rate_limit:apikey:{api_key_obj.api_key}"
-            limit = api_key_obj.rate_limit
-            window = api_key_obj.window
             
+            plan = api_key_obj.plan
+            plan_config = PLAN_LIMITS.get(plan, PLAN_LIMITS['free'])
             
+            limit = plan_config['limit']
+            window = plan_config['window']
+
         else:
             client_ip = self.get_client_ip(request) # Identify client
             if client_ip == 'unknown':

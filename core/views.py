@@ -70,7 +70,31 @@ def login_view(request):
             "api_key": raw_key  
         })
     
+
+@csrf_exempt
+def upgrade_plan(request):
+    api_key_value = request.headers.get("X-API-KEY")
     
+    if not api_key_value:
+        return JsonResponse({"error": "API Key required"}, status=400)
+    
+    hashed = hash_key(api_key_value)
+    
+    api_obj = APIKey.objects.filter(api_key=hashed).first()
+    
+    if not api_obj:
+        return JsonResponse({"error": "Invalid API Key"}, status=403)
+    
+    data = json.loads(request.body)
+    new_plan = data.get("plan")
+    
+    if new_plan not in ["free", "pro", "enterprise"]:
+        return JsonResponse({"error": "Invalid plan choice"}, status=400)
+    
+    api_obj.plan = new_plan
+    api_obj.save()
+    
+    return JsonResponse({"message": f"Plan upgraded to {new_plan}"}, status=200)    
     
 def logout_view(request):
     api_key_value = request.headers.get("X-API-KEY")
