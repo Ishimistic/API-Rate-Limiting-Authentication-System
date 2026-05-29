@@ -24,11 +24,12 @@ def signup(request):
         data = json.loads(request.body)
         username = data.get("username")
         password = data.get("password")
+        plan = data.get("plan", "free")
         
         if User.objects.filter(username=username).exists():
             return JsonResponse({"error": "Username already exists"}, status=400)
         
-        user = User.objects.create_user(username=username, password=password)
+        user = User.objects.create_user(username=username, password=password, plan=plan)
         
         raw_key = secrets.token_hex(32)
         hashed = hash_key(raw_key)
@@ -54,26 +55,33 @@ def login_view(request):
         
         if user is  None:
             return JsonResponse({"error": "Invalid credentials"}, status=401)
-        
-        raw_key = secrets.token_hex(32)
-        hashed = hash_key(raw_key)
 
-        api_obj, _ = APIKey.objects.get_or_create(user=user)
-        api_obj.api_key = hashed
+        api_obj, created = APIKey.objects.get_or_create(user=user)
+
         api_obj.is_active = True
-        api_obj.expires_at = timezone.now() + timedelta(hours=24)
+        raw_key = None
+
+        if created:
+            raw_key = secrets.token_hex(32)
+            api_obj.api_key = hash_key(raw_key)
         api_obj.save()
 
 
-        return JsonResponse({
-            "message": "Login successful",
-            "api_key": raw_key  
-        })
+        response_data = {
+            "message": "Login successful"
+        }
+        if raw_key:
+            response_data["api_key"] = raw_key
+
+        return JsonResponse(response_data, status=200)
     
 
 @csrf_exempt
 def upgrade_plan(request):
     api_key_value = request.headers.get("X-API-KEY")
+    
+    data = json.loads(request.body)
+    new_plan = data.get("plan")
     
     if not api_key_value:
         return JsonResponse({"error": "API Key required"}, status=400)
@@ -85,8 +93,6 @@ def upgrade_plan(request):
     if not api_obj:
         return JsonResponse({"error": "Invalid API Key"}, status=403)
     
-    data = json.loads(request.body)
-    new_plan = data.get("plan")
     
     if new_plan not in ["free", "pro", "enterprise"]:
         return JsonResponse({"error": "Invalid plan choice"}, status=400)
@@ -95,7 +101,8 @@ def upgrade_plan(request):
     api_obj.save()
     
     return JsonResponse({"message": f"Plan upgraded to {new_plan}"}, status=200)    
-    
+
+
 def logout_view(request):
     api_key_value = request.headers.get("X-API-KEY")
     
